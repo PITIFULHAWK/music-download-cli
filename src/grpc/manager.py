@@ -109,19 +109,26 @@ class WrapperManager:
 
     async def decrypt_init(self, on_success: Callable[[str, str, bytes, int], Awaitable[None]],
                            on_failure: Callable[[str, str, bytes, int], Awaitable[None]]):
-        stream = self._stub.Decrypt(self._decrypt_request_generator())
         safely_create_task(self._decrypt_keepalive())
-        async for reply in stream:
-            reply: DecryptReply
-            if reply.data.adam_id == "KEEPALIVE":
-                continue
-            match reply.header.code:
-                case -1:
-                    safely_create_task(
-                        on_failure(reply.data.adam_id, reply.data.key, reply.data.sample, reply.data.sample_index))
-                case 0:
-                    safely_create_task(
-                        on_success(reply.data.adam_id, reply.data.key, reply.data.sample, reply.data.sample_index))
+        while True:
+            try:
+                stream = self._stub.Decrypt(self._decrypt_request_generator())
+                async for reply in stream:
+                    reply: DecryptReply
+                    if reply.data.adam_id == "KEEPALIVE":
+                        continue
+                    match reply.header.code:
+                        case -1:
+                            safely_create_task(
+                                on_failure(reply.data.adam_id, reply.data.key, reply.data.sample, reply.data.sample_index))
+                        case 0:
+                            safely_create_task(
+                                on_success(reply.data.adam_id, reply.data.key, reply.data.sample, reply.data.sample_index))
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                it(GlobalLogger).logger.warning(f"Decrypt stream disconnected, reconnecting: {e}")
+                await asyncio.sleep(3)
 
     async def _decrypt_keepalive(self):
         while True:

@@ -368,7 +368,7 @@ class Ripper:
         ]
         await asyncio.gather(*tasks)
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
     async def decrypt_sample_with_retry(self, adam_id: str, key: str, sample: bytes, sample_index: int):
         task = self.download_manager.get_task(adam_id)
         if not task:
@@ -383,8 +383,8 @@ class Ripper:
         # We need to send the command to wrapper manager
         await it(WrapperManager).decrypt(adam_id, key, sample, sample_index)
 
-        # Wait for the future to be resolved by the callback
-        return await future
+        # Wait for the future to be resolved by the callback, with timeout
+        return await asyncio.wait_for(future, timeout=60)
 
     async def on_decrypt_success(self, adam_id: str, key: str, sample: bytes, sample_index: int):
         it(Measurer).record_decrypt(len(sample))
