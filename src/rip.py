@@ -3,7 +3,6 @@ import subprocess
 from typing import Dict, Optional
 
 from creart import it
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 from src.api import WebAPI
 from src.config import Config
@@ -377,7 +376,7 @@ class Ripper:
         tracks = playlist_info.data[0].relationships.tracks.data
         done_handler = ParentDoneHandler(len(tracks), on_children_done)
         seen_ids: set[str] = set()
-        sem = asyncio.Semaphore(2)
+        sem = asyncio.Semaphore(1)
 
         async def _rip_one(track):
             async with sem:
@@ -394,7 +393,6 @@ class Ripper:
             tasks.append(asyncio.create_task(_rip_one(track)))
         await asyncio.gather(*tasks)
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
     async def decrypt_sample_with_retry(self, adam_id: str, key: str, sample: bytes, sample_index: int):
         task = self.download_manager.get_task(adam_id)
         if not task:
