@@ -114,6 +114,7 @@ async def main():
     else:
         print("No regions available on wrapper-manager")
 
+    wm.set_fail_pending_handler(ripper.fail_pending_decrypts)
     decrypt_task = asyncio.create_task(wm.decrypt_init(
         on_success=ripper.on_decrypt_success,
         on_failure=ripper.on_decrypt_failed

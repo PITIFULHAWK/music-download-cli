@@ -419,4 +419,12 @@ class Ripper:
             if not task.decrypted_samples_futures[sample_index].done():
                 task.decrypted_samples_futures[sample_index].set_exception(Exception("Decryption failed callback"))
 
+    async def fail_pending_decrypts(self, pending: set[tuple[str, int]]):
+        for adam_id, sample_index in pending:
+            task = self.download_manager.get_task(adam_id)
+            if task and sample_index in task.decrypted_samples_futures:
+                if not task.decrypted_samples_futures[sample_index].done():
+                    task.decrypted_samples_futures[sample_index].set_exception(
+                        Exception("Decrypt stream disconnected"))
+
     # Removed recv_decrypted_sample and on_decrypt_done as they are replaced by linear flow in rip_song
