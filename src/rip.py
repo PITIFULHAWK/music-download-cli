@@ -25,15 +25,22 @@ from src.types import Codec, ParentDoneHandler
 from src.url import Song, Album, URLType, Playlist
 from src.utils import get_codec_from_codec_id, check_song_existence, check_song_exists, if_raw_atmos, \
     check_album_existence, playlist_write_song_index, run_sync, safely_create_task, language_exist, query_language
+from pydantic import ValidationError
 
 
 class DownloadManager:
     def __init__(self):
         self.adam_id_task_mapping: Dict[str, Task] = {}
         self.task_lock = asyncio.Semaphore(it(Config).download.maxRunningTasks)
+        self.total = 0
+        self.ok = 0
+        self.fail = 0
+        self._all_done = asyncio.Event()
 
     async def register_task(self, task: Task):
         self.adam_id_task_mapping[task.adamId] = task
+        self.total += 1
+        self._all_done.clear()
         await self.task_lock.acquire()
         it(Measurer).record_task_start()
 
@@ -42,9 +49,18 @@ class DownloadManager:
             del self.adam_id_task_mapping[task.adamId]
             self.task_lock.release()
             it(Measurer).record_task_finish()
+            if task.status == Status.DONE:
+                self.ok += 1
+            else:
+                self.fail += 1
+            if it(Measurer).tasks_count() == 0:
+                self._all_done.set()
 
     def get_task(self, adam_id: str) -> Optional[Task]:
         return self.adam_id_task_mapping.get(adam_id)
+
+    async def wait_until_idle(self):
+        await self._all_done.wait()
 
 
 class Ripper:
@@ -222,6 +238,10 @@ class Ripper:
             task.update_status(Status.FAILED)
             task.error = Exception("Task execution timed out")
 
+        except ValidationError as e:
+            task.logger.logger.error(f"Metadata fetch failed (song may not exist on this storefront): {e}")
+            task.update_status(Status.FAILED)
+            task.error = e
         except Exception as e:
             task.logger.logger.exception(f"Error processing song: {e}")
             task.update_status(Status.FAILED)

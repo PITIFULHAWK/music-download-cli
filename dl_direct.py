@@ -18,7 +18,16 @@ from src.api import WebAPI
 from src.measurer import Measurer
 from src.utils import check_dep
 
-USAGE = "Usage: music-alac <apple-music-or-spotify-url> [alac|aac|aac-legacy|ec3|ac3]"
+USAGE = """Usage: music-alac <url> [codec]
+Download songs from Apple Music (or resolve Spotify URLs) at the best available quality.
+
+Positional:
+  url     Apple Music or Spotify URL (song/album/playlist)
+  codec   alac (default), aac, aac-legacy, ec3, ac3
+
+Options:
+  --help  Show this help message
+"""
 
 def is_supported_url(raw_url: str) -> bool:
     return (
@@ -68,12 +77,17 @@ async def resolve_url(raw_url: str) -> str:
         return apple_url
 
 async def main():
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(USAGE)
         return
 
     url_str = sys.argv[1]
     codec = sys.argv[2] if len(sys.argv) > 2 else it(Config).download.codecPriority[0]
+    if codec not in ("alac", "aac", "aac-legacy", "ec3", "ac3"):
+        print(f"Invalid codec: {codec}")
+        print(USAGE)
+        return
+
     if not is_supported_url(url_str):
         print("Only Apple Music and Spotify URLs are supported.")
         print(USAGE)
@@ -109,19 +123,18 @@ async def main():
         match url.type:
             case URLType.Song:
                 await ripper.rip_song(url, codec, Flags(force_save=True, language="en-US"))
+                await asyncio.sleep(1)
             case URLType.Album:
                 await ripper.rip_album(url, codec, Flags(force_save=True, language="en-US"))
+                await ripper.download_manager.wait_until_idle()
             case URLType.Playlist:
                 await ripper.rip_playlist(url, codec, Flags(force_save=True, language="en-US"))
+                await ripper.download_manager.wait_until_idle()
             case _:
                 print(f"Unsupported Apple Music URL type: {url.type}")
                 return
-        await asyncio.sleep(2)
-        for _ in range(3580):
-            if it(Measurer).tasks_count() == 0:
-                break
-            await asyncio.sleep(1)
-        print("Done!")
+        dm = ripper.download_manager
+        print(f"Done! {dm.ok} ok, {dm.fail} failed out of {dm.total}")
     finally:
         decrypt_task.cancel()
         with suppress(asyncio.CancelledError):
