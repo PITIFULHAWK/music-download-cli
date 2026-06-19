@@ -162,7 +162,7 @@ class Ripper:
             # Wait in queue
             task.logger.logger.info("Waiting for available download streams...")
             async with it(WebAPI).download_lock:
-                async def _phase2():
+                async def _phase2_once():
                     # Download
                     task.logger.downloading()
                     task.update_status(Status.DOWNLOADING)
@@ -177,7 +177,7 @@ class Ripper:
                     for i in range(len(task.info.samples)):
                         task.decrypted_samples_futures[i] = asyncio.get_running_loop().create_future()
         
-                    # Launch decryption for all samples with tenacity
+                    # Launch decryption for all samples
                     decryption_tasks = []
                     for sampleIndex, sample in enumerate(task.info.samples):
                         decryption_tasks.append(
@@ -187,15 +187,11 @@ class Ripper:
                         if sampleIndex % 100 == 0:
                             await asyncio.sleep(0)
         
-                    # Wait for all decryption tasks to complete.
-                    # If any decrypt_sample_with_retry fails (raises exception after retries), we catch it.
                     await asyncio.gather(*decryption_tasks)
         
                     # Encapsulate and Save
-                    # Collect results from futures in order
                     decrypted_samples = []
                     for i in range(len(task.info.samples)):
-                        # At this point all futures should have result because gather completed successfully
                         decrypted_samples.append(task.decrypted_samples_futures[i].result())
         
                     local_codec = get_codec_from_codec_id(task.m3u8Info.codec_id)
@@ -226,6 +222,20 @@ class Ripper:
                     if it(Config).download.afterDownloaded:
                         command = it(Config).download.afterDownloaded.format(filename=local_filename)
                         subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                async def _phase2():
+                    for attempt in range(3):
+                        try:
+                            await _phase2_once()
+                            return
+                        except (SongNotPassIntegrityCheckException, CodecNotFoundException, ValidationError) as e:
+                            raise
+                        except Exception as e:
+                            if attempt == 2:
+                                raise
+                            task.logger.logger.warning(f"Download/decrypt failed, retrying ({attempt + 2}/3)...")
+                            task.decrypted_samples_futures.clear()
+                            task.info = None
                 
                 if timeout_sec > 0:
                     await asyncio.wait_for(_phase2(), timeout=timeout_sec)

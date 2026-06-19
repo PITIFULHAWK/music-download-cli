@@ -111,8 +111,14 @@ class WrapperManager:
                                             sample=sample)))
 
     async def _decrypt_request_generator(self):
+        count = 0
         while True:
-            yield await self._decrypt_queue.get()
+            item = await self._decrypt_queue.get()
+            yield item
+            if item.data.adam_id != "KEEPALIVE":
+                count += 1
+                if count % 200 == 0:
+                    await asyncio.sleep(1)
 
     async def decrypt_init(self, on_success: Callable[[str, str, bytes, int], Awaitable[None]],
                            on_failure: Callable[[str, str, bytes, int], Awaitable[None]]):
