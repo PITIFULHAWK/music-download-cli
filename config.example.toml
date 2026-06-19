@@ -1,0 +1,121 @@
+# DO NOT EDIT IT
+version = "0.0.10"
+
+[instance]
+url = "127.0.0.1:8080"
+secure = false
+
+[localInstance]
+# Use qemu to launch wrapper-manager
+# This setting will overwrite instance setting
+enable = false
+# Use WHPX on Windows and KVM on Linux
+# For Windows users, run `Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform` to check if WHPX enabled
+# For Linux users, run `sudo kvm-ok` to check if KVM supported
+enableHardwareAcceleration = false
+# For Windows WHPX, you may have to set hardwareAccelerator to `whpx,kernel-irqchip=off` and cpuModel to `qemu64-v1`
+hardwareAccelerator = ""
+memorySize = "512M"
+cpuModel = "Cascadelake-Server-v5"
+showWindow = false
+startArgs = "-host 0.0.0.0 -port 32767 -debug"
+
+[region]
+# The language of song metadata. Influence song title, author and other information.
+# Simplified Chinese: zh-Hans-CN, Tradidional Chinese(Hong Kong): zh-Hant-HK, Tradidional Chinese(Taiwan): zh-Hant-TW
+# English(British): en-GB, English(American): en-US, Japanese: ja, Korean: ko
+language = "zh-Hant-HK"
+# Pring warning when selected language does not exist on songs' region
+languageNotExistWarning = true
+
+[download]
+# Send request to Apple Music through proxy. Only support http and https protocol
+proxy = ""
+# Number of concurrent song downloads
+parallelNum = 1
+# Number of max running tasks
+maxRunningTasks = 128
+# Specify the IP address to use when downloading to speed up downloading
+# Taiwan: 17.253.117.201-17.253.117.203
+# Hongkong: 17.253.85.201-17.253.85.206, 17.253.87.195, 17.253.87.196, 17.253.87.201, 17.253.87.203
+# Japan: 17.253.69.200, 17.253.69.202, 17.253.75.201, 17.253.75.202
+appleCDNIP = ""
+# After enabling this feature, if the specified codec does not exist, the script will look for another codec to download
+codecAlternative = true
+# Priority to look for alternative codec
+# To download AAC lossy audio when lossless audio is not available, add "aac-legacy" to this configuration.
+codecPriority = ["alac", "ec3", "ac3", "aac"]
+# Encapsulate Atmos(ec-3/ac-3) as M4A and write the song metadata
+atmosConventToM4a = true
+# If the song integrity check fails, the task will fail and the song will not be saved.
+# Due to the possibility of source file corruption, open with caution.
+# See more: https://github.com/WorldObservationLog/AppleMusicDecrypt?tab=readme-ov-file#song-did-not-pass-the-integrity-check
+failedSongNotPassIntegrityCheck = false
+# Follow the Python Format (https://docs.python.org/3/library/string.html#formatstrings)
+# Write the audio information to the songNameFormat and playlistSongNameFormat
+# Only support alac codec
+# Available values: bit_depth, sample_rate, sample_rate_kHz, codec
+# This feature may slow down the speed of checking for existing songs
+# For example:
+# audioInfoFormat = " [{codec}][{bit_depth}bit][{sample_rate_kHz}kHz]"
+# songNameFormat = "{disk}-{tracknum:02d} {title}{audio_info}"
+# When ripping audio with alac codec, the ripped file name is:
+# 1-01 名もなき何もかも [ALAC][16bit][44.1kHz]
+# When ripping audio with other codecs, the ripped file name is:
+# 1-01 名もなき何もかも
+audioInfoFormat = ""
+# Available values:
+# title, artist, album, album_artist, composer,
+# genre, created, track, tracknum, disk,
+# record_company, upc, isrc, copyright, codec, audio_info
+# song_id, album_id, album_created, total_tracks, total_disks
+songNameFormat = "{disk}-{tracknum:02d} {title}"
+# Available values:
+# title, artist, album, album_artist, composer,
+# genre, created, track, tracknum, disk, album_created
+# record_company, upc, isrc, copyright, codec, album_id
+# disk_total
+dirPathFormat = "downloads/{album_artist}/{album}"
+# Available values:
+# title, artist, album, album_artist, composer,
+# genre, created, track, tracknum, disk,
+# record_company, upc, isrc, copyright,
+# playlistName, playlistCuratorName, codec
+playlistDirPathFormat = "downloads/playlists/{playlistName}"
+# Available values:
+# title, artist, album, album_artist, composer,
+# genre, created, track, tracknum, disk,
+# record_company, upc, isrc, copyright, audio_info
+# playlistName, playlistCuratorName, playlistSongIndex, codec
+# song_id, album_id, album_created, total_tracks, total_disks
+playlistSongNameFormat = "{playlistSongIndex:02d}. {artist} - {title}"
+# Save lyrics as .lrc file
+saveLyrics = true
+# lrc or ttml
+# TTML format lyrics will be saved as .ttml suffix
+lyricsFormat = "lrc"
+# Only applies to lrc lyrics
+lyricsExtra = ["translation", "pronunciation"]
+saveCover = true
+coverFormat = "jpg"
+coverSize = "5000x5000"
+# Limit the maximum bit rate and bit depth of audio files. Only valid for ALAC codec
+maxSampleRate = 192000
+maxBitDepth = 24
+# The command to be executed after the song is ripped successfully, passing in the filename parameter.
+# Example: "\"C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe\" \"{filename}\""
+# Pay attention to escaping issues
+afterDownloaded = ""
+retryTime = 8
+maxWaitTime = 30
+
+[metadata]
+# Metadata to be written to the song
+# Available values:
+# title, artist, album, album_artist, composer,
+# genre, created, track, tracknum, disk,
+# record_company, upc, isrc, copyright,
+# lyrics, cover, ratings(rtng), song_id, album_id, artist_id
+embedMetadata = ["title", "artist", "album", "album_artist", "composer", "album_created",
+    "genre", "created", "tracknum", "disk", "lyrics", "cover", "copyright",
+    "record_company", "upc", "isrc", "rtng", "song_id", "album_id", "artist_id"]

@@ -1,0 +1,130 @@
+import asyncio, sys
+from contextlib import suppress
+import httpx
+from creart import add_creator
+from src.logger import LoggerCreator; add_creator(LoggerCreator)
+from src.config import ConfigCreator; add_creator(ConfigCreator)
+from src.api import APICreator; add_creator(APICreator)
+from src.grpc.manager import WMCreator; add_creator(WMCreator)
+from src.measurer import MeasurerCreator; add_creator(MeasurerCreator)
+
+from creart import it
+from src.rip import Ripper
+from src.config import Config
+from src.grpc.manager import WrapperManager
+from src.flags import Flags
+from src.url import AppleMusicURL, URLType
+from src.api import WebAPI
+from src.measurer import Measurer
+from src.utils import check_dep
+
+USAGE = "Usage: music-alac <apple-music-or-spotify-url> [alac|aac|aac-legacy|ec3|ac3]"
+
+def is_supported_url(raw_url: str) -> bool:
+    return (
+        "music.apple.com" in raw_url
+        or "open.spotify.com" in raw_url
+        or raw_url.startswith("spotify:")
+    )
+
+async def resolve_url(raw_url: str) -> str:
+    if "open.spotify.com" not in raw_url and not raw_url.startswith("spotify:"):
+        return raw_url
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=30.0)) as client:
+        resp = await client.get("https://api.song.link/v1-alpha.1/links", params={"url": raw_url})
+        resp.raise_for_status()
+        data = resp.json()
+        apple_url = data.get("linksByPlatform", {}).get("appleMusic", {}).get("url")
+        if apple_url:
+            print(f"Resolved Spotify URL to Apple Music: {apple_url}")
+            return apple_url
+
+        spotify_entity = data.get("entitiesByUniqueId", {}).get(data.get("entityUniqueId"), {})
+        title = (spotify_entity.get("title") or "").strip()
+        artist = (spotify_entity.get("artistName") or "").strip()
+        entity = "song"
+        if "/album/" in raw_url or raw_url.startswith("spotify:album:"):
+            entity = "album"
+        if not title or not artist:
+            raise RuntimeError(f"Could not read Spotify metadata: {raw_url}")
+
+        search_resp = await client.get("https://itunes.apple.com/search", params={
+            "term": f"{artist} {title}",
+            "media": "music",
+            "entity": entity,
+            "country": "US",
+            "limit": 1,
+        })
+        search_resp.raise_for_status()
+        results = search_resp.json().get("results", [])
+        if not results:
+            raise RuntimeError(f"Could not resolve Spotify URL to Apple Music: {raw_url}")
+
+        apple_url = results[0].get("trackViewUrl") or results[0].get("collectionViewUrl")
+        if not apple_url:
+            raise RuntimeError(f"Could not resolve Spotify URL to Apple Music: {raw_url}")
+        print(f"Resolved Spotify URL to Apple Music: {apple_url}")
+        return apple_url
+
+async def main():
+    if len(sys.argv) < 2:
+        print(USAGE)
+        return
+
+    url_str = sys.argv[1]
+    codec = sys.argv[2] if len(sys.argv) > 2 else it(Config).download.codecPriority[0]
+    if not is_supported_url(url_str):
+        print("Only Apple Music and Spotify URLs are supported.")
+        print(USAGE)
+        return
+
+    url_str = await resolve_url(url_str)
+    url = AppleMusicURL.parse_url(url_str)
+    if not url:
+        print(f"Invalid Apple Music URL after resolution: {url_str}")
+        return
+
+    dep_ok, missing = check_dep()
+    if not dep_ok:
+        print(f"Missing dep: {missing}"); return
+
+    ripper = Ripper(); config = it(Config); wm = it(WrapperManager)
+
+    await asyncio.to_thread(it(WebAPI).init)
+    await wm.init(config.instance.url, config.instance.secure)
+    wm.status.cache_invalidate()
+    st = await wm.status()
+    if st.regions:
+        print(f"Regions: {', '.join(st.regions)}")
+    else:
+        print("No regions available on wrapper-manager")
+
+    decrypt_task = asyncio.create_task(wm.decrypt_init(
+        on_success=ripper.on_decrypt_success,
+        on_failure=ripper.on_decrypt_failed
+    ))
+    try:
+        print(f"Downloading with codec: {codec}")
+        match url.type:
+            case URLType.Song:
+                await ripper.rip_song(url, codec, Flags(force_save=True, language="en-US"))
+            case URLType.Album:
+                await ripper.rip_album(url, codec, Flags(force_save=True, language="en-US"))
+            case URLType.Playlist:
+                await ripper.rip_playlist(url, codec, Flags(force_save=True, language="en-US"))
+            case _:
+                print(f"Unsupported Apple Music URL type: {url.type}")
+                return
+        await asyncio.sleep(2)
+        for _ in range(3580):
+            if it(Measurer).tasks_count() == 0:
+                break
+            await asyncio.sleep(1)
+        print("Done!")
+    finally:
+        decrypt_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await decrypt_task
+
+asyncio.run(main())
