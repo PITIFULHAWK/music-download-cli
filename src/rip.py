@@ -374,7 +374,9 @@ class Ripper:
         async def on_children_done():
             logger.done()
 
-        done_handler = ParentDoneHandler(len(playlist_info.data[0].relationships.tracks.data), on_children_done)
+        tracks = playlist_info.data[0].relationships.tracks.data
+        done_handler = ParentDoneHandler(len(tracks), on_children_done)
+        seen_ids: set[str] = set()
         sem = asyncio.Semaphore(2)
 
         async def _rip_one(track):
@@ -382,10 +384,14 @@ class Ripper:
                 song = Song(id=track.id, storefront=url.storefront, url="", type=URLType.Song)
                 await self.rip_song(song, codec, flags, done_handler, playlist=playlist_info)
 
-        tasks = [
-            asyncio.create_task(_rip_one(track))
-            for track in playlist_info.data[0].relationships.tracks.data
-        ]
+        tasks = []
+        for track in tracks:
+            if track.id in seen_ids:
+                logger.logger.info(f"Skipping duplicate: {track.id}")
+                await done_handler.try_done()
+                continue
+            seen_ids.add(track.id)
+            tasks.append(asyncio.create_task(_rip_one(track)))
         await asyncio.gather(*tasks)
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))

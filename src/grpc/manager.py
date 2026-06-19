@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import suppress
 from typing import Awaitable, Callable, Type
 
 from async_lru import alru_cache
@@ -115,37 +116,42 @@ class WrapperManager:
 
     async def decrypt_init(self, on_success: Callable[[str, str, bytes, int], Awaitable[None]],
                            on_failure: Callable[[str, str, bytes, int], Awaitable[None]]):
-        safely_create_task(self._decrypt_keepalive())
-        while True:
-            try:
-                self._pending_decrypts.clear()
-                stream = self._stub.Decrypt(self._decrypt_request_generator())
-                async for reply in stream:
-                    reply: DecryptReply
-                    if reply.data.adam_id == "KEEPALIVE":
-                        continue
-                    self._pending_decrypts.discard((reply.data.adam_id, reply.data.sample_index))
-                    match reply.header.code:
-                        case -1:
-                            safely_create_task(
-                                on_failure(reply.data.adam_id, reply.data.key, reply.data.sample, reply.data.sample_index))
-                        case 0:
-                            safely_create_task(
-                                on_success(reply.data.adam_id, reply.data.key, reply.data.sample, reply.data.sample_index))
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                it(GlobalLogger).logger.warning(f"Decrypt stream disconnected, reconnecting: {e}")
-                if self._pending_decrypts:
-                    it(GlobalLogger).logger.warning(f"Failing {len(self._pending_decrypts)} in-flight decrypt samples")
-                    if self._fail_pending_handler:
-                        await self._fail_pending_handler(self._pending_decrypts)
-                    else:
-                        for adam_id, sample_index in list(self._pending_decrypts):
-                            safely_create_task(on_failure(adam_id, "", b"", sample_index))
-                self._pending_decrypts.clear()
-                self._decrypt_queue = asyncio.Queue()
-                await asyncio.sleep(3)
+        keepalive_task = asyncio.ensure_future(self._decrypt_keepalive())
+        try:
+            while True:
+                try:
+                    self._pending_decrypts.clear()
+                    stream = self._stub.Decrypt(self._decrypt_request_generator())
+                    async for reply in stream:
+                        reply: DecryptReply
+                        if reply.data.adam_id == "KEEPALIVE":
+                            continue
+                        self._pending_decrypts.discard((reply.data.adam_id, reply.data.sample_index))
+                        match reply.header.code:
+                            case -1:
+                                safely_create_task(
+                                    on_failure(reply.data.adam_id, reply.data.key, reply.data.sample, reply.data.sample_index))
+                            case 0:
+                                safely_create_task(
+                                    on_success(reply.data.adam_id, reply.data.key, reply.data.sample, reply.data.sample_index))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    it(GlobalLogger).logger.warning(f"Decrypt stream disconnected, reconnecting: {e}")
+                    if self._pending_decrypts:
+                        it(GlobalLogger).logger.warning(f"Failing {len(self._pending_decrypts)} in-flight decrypt samples")
+                        if self._fail_pending_handler:
+                            await self._fail_pending_handler(self._pending_decrypts)
+                        else:
+                            for adam_id, sample_index in list(self._pending_decrypts):
+                                safely_create_task(on_failure(adam_id, "", b"", sample_index))
+                    self._pending_decrypts.clear()
+                    self._decrypt_queue = asyncio.Queue()
+                    await asyncio.sleep(3)
+        finally:
+            keepalive_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await keepalive_task
 
     async def _decrypt_keepalive(self):
         while True:

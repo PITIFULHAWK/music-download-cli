@@ -76,6 +76,36 @@ async def resolve_url(raw_url: str) -> str:
         print(f"Resolved Spotify URL to Apple Music: {apple_url}")
         return apple_url
 
+async def run_download(url, codec, ripper) -> bool:
+    wm = it(WrapperManager)
+    wm.set_fail_pending_handler(ripper.fail_pending_decrypts)
+    decrypt_task = asyncio.create_task(wm.decrypt_init(
+        on_success=ripper.on_decrypt_success,
+        on_failure=ripper.on_decrypt_failed
+    ))
+    try:
+        print(f"Downloading with codec: {codec}")
+        match url.type:
+            case URLType.Song:
+                await ripper.rip_song(url, codec, Flags(force_save=True, language="en-US"))
+                await asyncio.sleep(1)
+            case URLType.Album:
+                await ripper.rip_album(url, codec, Flags(force_save=True, language="en-US"))
+                await ripper.download_manager.wait_until_idle()
+            case URLType.Playlist:
+                await ripper.rip_playlist(url, codec, Flags(force_save=True, language="en-US"))
+                await ripper.download_manager.wait_until_idle()
+            case _:
+                print(f"Unsupported Apple Music URL type: {url.type}")
+                return False
+        dm = ripper.download_manager
+        print(f"Done! {dm.ok} ok, {dm.fail} failed out of {dm.total}")
+        return dm.fail == 0
+    finally:
+        decrypt_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await decrypt_task
+
 async def main():
     if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(USAGE)
@@ -103,7 +133,7 @@ async def main():
     if not dep_ok:
         print(f"Missing dep: {missing}"); return
 
-    ripper = Ripper(); config = it(Config); wm = it(WrapperManager)
+    config = it(Config); wm = it(WrapperManager)
 
     await asyncio.to_thread(it(WebAPI).init)
     await wm.init(config.instance.url, config.instance.secure)
@@ -114,31 +144,23 @@ async def main():
     else:
         print("No regions available on wrapper-manager")
 
-    wm.set_fail_pending_handler(ripper.fail_pending_decrypts)
-    decrypt_task = asyncio.create_task(wm.decrypt_init(
-        on_success=ripper.on_decrypt_success,
-        on_failure=ripper.on_decrypt_failed
-    ))
-    try:
-        print(f"Downloading with codec: {codec}")
-        match url.type:
-            case URLType.Song:
-                await ripper.rip_song(url, codec, Flags(force_save=True, language="en-US"))
-                await asyncio.sleep(1)
-            case URLType.Album:
-                await ripper.rip_album(url, codec, Flags(force_save=True, language="en-US"))
-                await ripper.download_manager.wait_until_idle()
-            case URLType.Playlist:
-                await ripper.rip_playlist(url, codec, Flags(force_save=True, language="en-US"))
-                await ripper.download_manager.wait_until_idle()
-            case _:
-                print(f"Unsupported Apple Music URL type: {url.type}")
-                return
-        dm = ripper.download_manager
-        print(f"Done! {dm.ok} ok, {dm.fail} failed out of {dm.total}")
-    finally:
-        decrypt_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await decrypt_task
+    while True:
+        ripper = Ripper()
+        ok = await run_download(url, codec, ripper)
+        if ok:
+            break
+        try:
+            answer = await asyncio.to_thread(input, "Retry failed items? [y/N]: ")
+        except (EOFError, OSError):
+            break
+        if answer.strip().lower() not in ("y", "yes"):
+            break
 
-asyncio.run(main())
+def real_main():
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+
+if __name__ == "__main__":
+    real_main()
