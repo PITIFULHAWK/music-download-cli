@@ -85,16 +85,20 @@ class WebAPI:
            wait=wait_random_exponential(multiplier=1, max=it(Config).download.maxWaitTime),
            stop=stop_after_attempt(it(Config).download.retryTime),
            before_sleep=before_sleep_log(it(GlobalLogger).logger, "WARNING"))
-    async def _download_song_internal(self, url: str) -> bytes:
+    async def _download_song_internal(self, url: str, task=None) -> bytes:
         result = BytesIO()
         timeout = httpx.Timeout(15.0, read=60.0, connect=15.0, pool=20.0)
         async with httpx.AsyncClient(transport=AsyncCustomHost(NameSolver()), timeout=timeout) as client:
             async with client.stream('GET', url) as response:
                 total = int(response.headers.get("Content-Length") if response.headers.get("Content-Length")
                             else response.headers.get("X-Apple-MS-Content-Length"))
+                if task is not None:
+                    task.total_size = total
                 async for chunk in response.aiter_bytes():
                     it(Measurer).record_download(len(chunk))
                     result.write(chunk)
+                    if task is not None:
+                        task.downloaded_bytes += len(chunk)
             if len(result.getvalue()) != total:
                 raise httpx.HTTPError
             return result.getvalue()

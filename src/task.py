@@ -30,6 +30,8 @@ class Task:
     logger: Optional[RipLogger] = None
     decrypted_samples_futures: dict[int, asyncio.Future] = field(default_factory=dict)
     error: Optional[Exception] = None
+    total_size: int = 0
+    downloaded_bytes: int = 0
 
     def update_status(self, status: Status):
         self.status = status
