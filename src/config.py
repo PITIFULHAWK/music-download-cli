@@ -53,6 +53,7 @@ class Download(BaseModel):
     afterDownloaded: str = ""
     retryTime: int = 8
     maxWaitTime: int = 30
+    convertToFlac: bool = False
 
 
 class Metadata(BaseModel):

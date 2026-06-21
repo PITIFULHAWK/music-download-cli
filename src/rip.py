@@ -217,6 +217,10 @@ class Ripper:
         
                     local_filename = await run_sync(save, song_bytes, local_codec, task.metadata, task.playlist)
                     task.logger.saved()
+
+                    if it(Config).download.convertToFlac:
+                        local_filename = _convert_to_flac(local_filename, task)
+
                     task.update_status(Status.DONE)
         
                     if it(Config).download.afterDownloaded:
@@ -442,3 +446,31 @@ class Ripper:
                         Exception("Decrypt stream disconnected"))
 
     # Removed recv_decrypted_sample and on_decrypt_done as they are replaced by linear flow in rip_song
+
+
+def _convert_to_flac(m4a_path: str, task) -> str:
+    """Convert saved audio file to FLAC using ffmpeg.
+
+    For lossless sources (ALAC) this is bit-perfect.
+    For Dolby Atmos (E-AC-3) the spatial metadata is lost,
+    but the decoded PCM audio is preserved at full quality.
+    """
+    from pathlib import Path
+    src = Path(m4a_path)
+    dst = src.with_suffix(".flac")
+    if dst.exists():
+        return str(dst)
+    task.logger.logger.info("Converting to FLAC: %s", src.name)
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-i", str(src),
+         "-c:a", "flac", "-compression_level", "8",
+         "-f", "flac", str(dst)],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0 and dst.exists():
+        src.unlink(missing_ok=True)
+        task.logger.logger.info("Converted to FLAC: %s", dst.name)
+        return str(dst)
+    dst.unlink(missing_ok=True)
+    task.logger.logger.warning("FLAC conversion failed: %s", result.stderr[:200])
+    return m4a_path

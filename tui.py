@@ -27,6 +27,7 @@ prompt_toolkit.ANSI = lambda x: x
 # === Imports ===
 import asyncio
 import json
+import subprocess
 import sys
 import time
 from contextlib import suppress
@@ -237,13 +238,14 @@ Screen { layout: vertical; }
         cfg.download.saveCover = False
         cfg.download.saveLyrics = False
         cfg.download.playlistSongNameFormat = "{artist} - {title}"
+        cfg.download.convertToFlac = True
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Container(id="top-bar"):
             with Horizontal(id="top-bar-row1"):
                 yield Input(placeholder="Apple Music or Spotify URL...", id="url-input")
-                yield Select(CODEC_CHOICES, prompt="Codec", id="codec-select", value="ec3")
+                yield Select(CODEC_CHOICES, prompt="Codec", id="codec-select", value="alac")
                 yield Button(" Fetch ", id="download-btn", variant="primary")
                 yield Button(" Stop ", id="stop-btn", variant="error")
             with Horizontal(id="top-bar-row2"):
@@ -266,7 +268,8 @@ Screen { layout: vertical; }
 
     def on_mount(self):
         table = self.query_one("#queue-table", DataTable)
-        table.add_columns("#", "Song", "Op", "Status")
+        self._col_num, self._col_song, self._col_op, self._col_status = \
+            table.add_columns("#", "Song", "Op", "Status")
         table.cursor_type = "row"
         log = self.query_one("#log-content", RichLog)
         log.can_focus = True
@@ -620,20 +623,25 @@ Screen { layout: vertical; }
     def _render_queue(self):
         table = self.query_one("#queue-table", DataTable)
 
-        old_scroll_y = getattr(table, 'scroll_y', None) or 0
-        old_cursor = table.cursor_row
-        table.clear()
+        existing = len(table.rows)
+        target = len(self._all_tracks)
 
-        for i, t in enumerate(self._all_tracks, 1):
-            table.add_row(*self._build_row(i, t))
+        if target < existing:
+            # Track list shrank (new fetch) — full redraw
+            table.clear()
+            for i, t in enumerate(self._all_tracks, 1):
+                table.add_row(*self._build_row(i, t))
+            return
 
-        if old_cursor is not None:
-            try:
-                table.move_cursor(row=int(old_cursor))
-            except Exception:
-                pass
-        if old_scroll_y:
-            table.scroll_to(y=old_scroll_y)
+        # Add new rows if any (fetch phase) — no clear, avoids scroll jitter
+        for i in range(existing, target):
+            table.add_row(*self._build_row(i + 1, self._all_tracks[i]))
+
+        # Update status/op cells for existing rows (poll phase)
+        for i in range(min(existing, target)):
+            t = self._all_tracks[i]
+            table.update_cell(i, self._col_op, self._op_str(t))
+            table.update_cell(i, self._col_status, self._status_str(t))
 
     def _find_active_task(self, tracks: list[dict]) -> Optional[Task]:
         if not self.ripper:
@@ -698,6 +706,8 @@ Screen { layout: vertical; }
                         try:
                             song_name, dir_path = get_song_name_and_dir_path(self._current_codec, task.metadata, task.playlist)
                             suffix = get_suffix(self._current_codec, it(Config).download.atmosConventToM4a)
+                            if it(Config).download.convertToFlac:
+                                suffix = ".flac"
                             file_path = str(dir_path / (song_name + suffix))
                         except Exception:
                             file_path = None
@@ -854,6 +864,36 @@ Screen { layout: vertical; }
                                 Path(dl["file_path"]).unlink(missing_ok=True)
                                 already = False
                                 self._log(f"[yellow]Truncated file discarded, re-downloading: {title}[/]")
+                            elif it(Config).download.convertToFlac and not dl["file_path"].endswith(".flac"):
+                                # Existing .m4a file — convert to .flac
+                                m4a = Path(dl["file_path"])
+                                flac = m4a.with_suffix(".flac")
+                                if not flac.exists():
+                                    self._log(f"[grey62]Converting to FLAC: {title}[/]")
+                                    result = subprocess.run(
+                                        ["ffmpeg", "-y", "-i", str(m4a),
+                                         "-c:a", "flac", "-compression_level", "8", str(flac)],
+                                        capture_output=True, text=True
+                                    )
+                                    if result.returncode == 0 and flac.exists():
+                                        m4a.unlink(missing_ok=True)
+                                        flac_path = str(flac)
+                                        upsert_download(aid, self._current_url, self._current_codec,
+                                                       "done", file_path=flac_path, title=title, artist=artist,
+                                                       duration_ms=duration_ms)
+                                        dl["file_path"] = flac_path
+                                        self._log(f"[green]Converted to FLAC: {title}[/]")
+                                    else:
+                                        flac.unlink(missing_ok=True)
+                                        self._log(f"[yellow]FLAC conversion failed for: {title}[/]")
+                                else:
+                                    # Flac already exists, just update the DB path
+                                    flac_path = str(flac)
+                                    upsert_download(aid, self._current_url, self._current_codec,
+                                                   "done", file_path=flac_path, title=title, artist=artist,
+                                                   duration_ms=duration_ms)
+                                    dl["file_path"] = flac_path
+                                    m4a.unlink(missing_ok=True)
                     entry["_checking"] = False
                     if already:
                         self._skip_count += 1
