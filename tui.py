@@ -481,7 +481,17 @@ Screen { layout: vertical; }
             ))
 
             try:
-                await self.ripper.rip_song(song, codec, flags)
+                # Fetch playlist context for correct save path
+                playlist_info = None
+                try:
+                    url_obj = AppleMusicURL.parse_url(self._current_url)
+                    if url_obj and url_obj.type == URLType.Playlist:
+                        wapi = it(WebAPI)
+                        playlist_info = await wapi.get_playlist_info(
+                            id=url_obj.id, storefront=url_obj.storefront, language="en-US")
+                except Exception:
+                    pass
+                await self.ripper.rip_song(song, codec, flags, playlist=playlist_info)
             finally:
                 if self._decrypt_task:
                     self._decrypt_task.cancel()
