@@ -239,6 +239,7 @@ Screen { layout: vertical; }
         cfg.download.saveLyrics = False
         cfg.download.playlistSongNameFormat = "{artist} - {title}"
         cfg.download.convertToFlac = True
+        self._table_row_keys: list = []  # track DataTable row keys for updates
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -623,25 +624,28 @@ Screen { layout: vertical; }
     def _render_queue(self):
         table = self.query_one("#queue-table", DataTable)
 
-        existing = len(table.rows)
+        existing = len(self._table_row_keys)
         target = len(self._all_tracks)
 
         if target < existing:
             # Track list shrank (new fetch) — full redraw
             table.clear()
-            for i, t in enumerate(self._all_tracks, 1):
-                table.add_row(*self._build_row(i, t))
+            self._table_row_keys.clear()
+            for t in self._all_tracks:
+                self._table_row_keys.append(table.add_row(*self._build_row(len(self._table_row_keys) + 1, t)))
             return
 
-        # Add new rows if any (fetch phase) — no clear, avoids scroll jitter
+        # Add new rows if any (fetch phase)
         for i in range(existing, target):
-            table.add_row(*self._build_row(i + 1, self._all_tracks[i]))
+            self._table_row_keys.append(
+                table.add_row(*self._build_row(i + 1, self._all_tracks[i]))
+            )
 
         # Update status/op cells for existing rows (poll phase)
         for i in range(min(existing, target)):
             t = self._all_tracks[i]
-            table.update_cell(i, self._col_op, self._op_str(t))
-            table.update_cell(i, self._col_status, self._status_str(t))
+            table.update_cell(self._table_row_keys[i], self._col_op, self._op_str(t))
+            table.update_cell(self._table_row_keys[i], self._col_status, self._status_str(t))
 
     def _find_active_task(self, tracks: list[dict]) -> Optional[Task]:
         if not self.ripper:
