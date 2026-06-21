@@ -222,6 +222,8 @@ class Ripper:
                         local_filename = _convert_to_flac(local_filename, task)
 
                     task.update_status(Status.DONE)
+
+                    task.update_status(Status.DONE)
         
                     if it(Config).download.afterDownloaded:
                         command = it(Config).download.afterDownloaded.format(filename=local_filename)

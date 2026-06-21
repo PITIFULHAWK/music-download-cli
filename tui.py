@@ -738,6 +738,30 @@ Screen { layout: vertical; }
                                                     "id": aid})
                         if new_s == Status.DONE:
                             self._log(f"{label}: [green]Saved[/]")
+                            # Post-download FLAC conversion
+                            if it(Config).download.convertToFlac and task.metadata:
+                                try:
+                                    from src.utils import get_song_name_and_dir_path, get_suffix
+                                    song_name, dir_path = get_song_name_and_dir_path(
+                                        self._current_codec, task.metadata, task.playlist)
+                                    suffix = get_suffix(self._current_codec, it(Config).download.atmosConventToM4a)
+                                    m4a_path = dir_path / (song_name + suffix)
+                                    flac_path = m4a_path.with_suffix(".flac")
+                                    if m4a_path.exists() and not flac_path.exists():
+                                        self._log(f"Converting to FLAC: {label}")
+                                        result = subprocess.run(
+                                            ["ffmpeg", "-y", "-i", str(m4a_path),
+                                             "-c:a", "flac", "-compression_level", "8", str(flac_path)],
+                                            capture_output=True, text=True
+                                        )
+                                        if result.returncode == 0 and flac_path.exists():
+                                            m4a_path.unlink(missing_ok=True)
+                                            self._log(f"[green]Converted to FLAC: {label}[/]")
+                                        else:
+                                            flac_path.unlink(missing_ok=True)
+                                            self._log(f"[yellow]FLAC conversion failed for: {label}[/]")
+                                except Exception as exc:
+                                    pass
                         elif new_s == Status.FAILED:
                             err = str(task.error) if task.error else "Unknown"
                             self._log(f"{label}: [red]Failed[/] — {err}")
@@ -972,6 +996,7 @@ Screen { layout: vertical; }
         if self._mode == "done_with_failures" and self._retry_ids:
             self._log(f"Retrying {len(self._retry_ids)} failed song(s)...")
             self._mode = "idle"
+            it(Config).download.convertToFlac = True
             self._run_retry_worker(self._retry_ids, codec)
             return
 
@@ -988,6 +1013,7 @@ Screen { layout: vertical; }
             return
 
         # URL is fetched — now download
+        it(Config).download.convertToFlac = True
         self._mode = "downloading"
         self.download_running = True
         self.ripper = None
