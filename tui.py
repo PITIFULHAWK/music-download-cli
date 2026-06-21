@@ -455,7 +455,7 @@ Screen { layout: vertical; }
     async def _run_single_redownload(self, song: "Song"):
         try:
             codec = self._current_codec or "ec3"
-            flags = Flags(force_save=False, language="en-US")
+            flags = Flags(force_save=True, language="en-US")
 
             config = it(Config)
             wm = it(WrapperManager)

@@ -138,7 +138,13 @@ def ttml_convent(ttml: str) -> str:
 
 def check_song_exists(metadata, codec: str, playlist: PlaylistInfo = None):
     song_name, dir_path = get_song_name_and_dir_path(codec, metadata, playlist)
-    return (Path(dir_path) / Path(song_name + get_suffix(codec, it(Config).download.atmosConventToM4a))).exists()
+    path = Path(dir_path) / Path(song_name + get_suffix(codec, it(Config).download.atmosConventToM4a))
+    if path.exists():
+        return True
+    # After FLAC conversion the original is gone — check for .flac too
+    if it(Config).download.convertToFlac:
+        return (Path(dir_path) / Path(song_name + ".flac")).exists()
+    return False
 
 
 def get_valid_filename(filename: str):
