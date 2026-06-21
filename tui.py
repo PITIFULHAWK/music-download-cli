@@ -239,6 +239,10 @@ Screen { layout: vertical; }
         cfg.download.saveLyrics = False
         cfg.download.playlistSongNameFormat = "{artist} - {title}"
         cfg.download.convertToFlac = True
+        # Skip fetching lyrics entirely — wastes bandwidth
+        async def _noop_lyrics(*args, **kwargs):
+            return None
+        WrapperManager.lyrics = _noop_lyrics
         self._table_row_keys: list = []  # track DataTable row keys for updates
 
     def compose(self) -> ComposeResult:
@@ -304,6 +308,7 @@ Screen { layout: vertical; }
         ("ctrl+l", "cycle_codec", "Codec"),
         ("ctrl+k", "show_help", "Help"),
         ("ctrl+r", "redownload", "Redl"),
+        ("ctrl+t", "to_flac", "FLAC"),
         ("ctrl+x", "cancel_task", "X"),
         ("ctrl+c", "stop_all", "Stop"),
         ("r", "retry", "Retry"),
@@ -405,6 +410,47 @@ Screen { layout: vertical; }
         t = asyncio.create_task(self._run_single_redownload(song))
         self._solo_tasks.add(t)
         t.add_done_callback(self._solo_tasks.discard)
+
+    def action_to_flac(self):
+        table = self.query_one("#queue-table", DataTable)
+        if table.cursor_row is None or not self._all_tracks:
+            self._log("[yellow]No track selected[/]")
+            return
+        idx = table.cursor_row
+        if idx >= len(self._all_tracks):
+            return
+        track = self._all_tracks[idx]
+        title = self._track_label(track)
+        aid = track["id"]
+        # Search for any downloaded file regardless of codec
+        dl = get_download(aid, self._current_codec)
+        if not dl or not dl["file_path"]:
+            self._log("[yellow]No downloaded file found for this track[/]")
+            return
+        if dl["file_path"].endswith(".flac"):
+            self._log("[green]Already in FLAC format[/]")
+            return
+        m4a = Path(dl["file_path"])
+        if not m4a.exists():
+            self._log("[red]File not found on disk[/]")
+            return
+        flac = m4a.with_suffix(".flac")
+        self._log(f"Converting to FLAC: {title}")
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(m4a),
+             "-c:a", "flac", "-compression_level", "8", str(flac)],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0 and flac.exists():
+            m4a.unlink(missing_ok=True)
+            upsert_download(aid, self._current_url, self._current_codec,
+                           "done", file_path=str(flac), title=track.get("title"),
+                           artist=track.get("artist"),
+                           duration_ms=track.get("duration_ms"))
+            self._log(f"[green]Converted to FLAC: {title}[/]")
+        else:
+            flac.unlink(missing_ok=True)
+            self._log(f"[red]FLAC conversion failed: {result.stderr[:200]}[/]")
 
     async def _run_single_redownload(self, song: "Song"):
         try:
