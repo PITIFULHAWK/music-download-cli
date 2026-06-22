@@ -54,7 +54,12 @@ def get_download(song_id: str, codec: str) -> dict | None:
 def is_done_and_exists(song_id: str, codec: str) -> bool:
     dl = get_download(song_id, codec)
     if dl and dl["status"] == "done" and dl["file_path"]:
-        return Path(dl["file_path"]).exists()
+        p = Path(dl["file_path"])
+        if p.exists():
+            return True
+        # DB says .flac but file might still be .m4a — check fallback
+        if p.suffix == ".flac":
+            return p.with_suffix(".m4a").exists()
     return False
 
 

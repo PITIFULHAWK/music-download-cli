@@ -422,15 +422,17 @@ Screen { layout: vertical; }
         track = self._all_tracks[idx]
         title = self._track_label(track)
         aid = track["id"]
-        # Search for any downloaded file regardless of codec
         dl = get_download(aid, self._current_codec)
         if not dl or not dl["file_path"]:
             self._log("[yellow]No downloaded file found for this track[/]")
             return
-        if dl["file_path"].endswith(".flac"):
+        db_path = Path(dl["file_path"])
+        # If DB says .flac, check if it's actually on disk
+        if db_path.suffix == ".flac" and db_path.exists():
             self._log("[green]Already in FLAC format[/]")
             return
-        m4a = Path(dl["file_path"])
+        # DB path might be wrong (says .flac but file is .m4a) — look for .m4a
+        m4a = db_path.with_suffix(".m4a") if db_path.suffix == ".flac" else db_path
         if not m4a.exists():
             self._log("[red]File not found on disk[/]")
             return
@@ -790,8 +792,11 @@ Screen { layout: vertical; }
                         try:
                             song_name, dir_path = get_song_name_and_dir_path(self._current_codec, task.metadata, task.playlist)
                             suffix = get_suffix(self._current_codec, it(Config).download.atmosConventToM4a)
+                            # Use .flac suffix only if the file actually exists on disk
                             if it(Config).download.convertToFlac:
-                                suffix = ".flac"
+                                flac_path = dir_path / (song_name + ".flac")
+                                if flac_path.exists():
+                                    suffix = ".flac"
                             file_path = str(dir_path / (song_name + suffix))
                         except Exception:
                             file_path = None
